@@ -1,0 +1,2597 @@
+{
+    "schemes": [
+        "https",
+        "http"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "## Getting started\nReceive user messages and control events, then call the message APIs to reply. Obtain the environment-specific API origin from the IM team; the API prefix is `/api/v1/bot`.\n\nTo obtain a Bot token, contact the IM team with `owner_username`, a `username` starting with `bot_`, `nickname`, `avatar_url`, and an optional `webhook_url`. These are onboarding details, not the `/create` request schema.\n`/create` requires a signed-in user session via `Authorization: Bearer \u003cuser token\u003e`, not a Bot token. See its request schema below.\n\n## Authentication and responses\nToken methods accept `X-Api-Key: \u003cbot token\u003e` at `/api/v1/bot/\u003cmethod\u003e`, or a token in `/api/v1/bot/\u003cbot token\u003e/\u003cmethod\u003e`. This reference uses the header form. Privileged methods additionally require the configured privileged Bot IDs.\nAPI responses use `{code, message, data}`. Success is HTTP 200 with `code: SUCCESS`; errors use the appropriate HTTP status and `data: null`. Check both status and code. Search results use protobuf JSON; other responses use ordinary JSON.\n\n## Receiving events\nUse `bot.getUpdates` to long-poll `data.events`, or configure `webhook_url` to receive POST requests. Webhooks do not consume polling events; deduplicate by Bot and event ID when using both.\nWebhook bodies are JSON event arrays, without the API envelope. Events contain `id`, `version` (currently `v1`), `timestamp` in milliseconds, `event_type`, and `data`; webhooks also include `bot_id`.\nEvent types include `user_message`, `group_message`, `edit_message`, `bot:delete_topic`, `bot:fork_topic`, `bot:skip_thinking`, and `bot:stop_responding`. Delivery depends on the action and visibility rules. Accept unknown event types.\nMessage and edit events carry `data.message`. Topic deletion carries `data.user` and `data.topic`; topic fork additionally carries `data.messages` as conversation history. Control events identify their target in `data.message`. Optional payload fields may be absent.\nWebhook requests have a 10-second timeout. Network failures and HTTP statuses \u003e= 400 are logged without automatic delivery retries. Persist events before acknowledging them; delivery is best effort. Polling also has bounded retention.\n\nExample webhook body:\n```json\n[{\"id\":\"1768903490706-0\",\"version\":\"v1\",\"timestamp\":1768903490706,\"event_type\":\"user_message\",\"bot_id\":6888,\"data\":{\"message\":{\"message_id\":\"696f5342fd5c13c38d85103e\",\"message_type\":\"text\",\"user_id\":123,\"to_user_id\":6888,\"text\":\"Hello\",\"attachment\":null}}}]\n```",
+        "title": "SIU Bot API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/api/v1/bot",
+    "paths": {
+        "/bot.getUpdates": {
+            "get": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Returns `data.events`; an empty array is returned when the long poll times out.\nOnly events after `start_id` are returned. Omit it to read from the oldest retained event; use the last processed event ID for the next request.\nEvents through the last returned ID are deleted before the HTTP response is sent. A lost response cannot restore these events. Persist received events and your cursor, and deduplicate repeated IDs.\nPolling backlog retention is bounded by the server configuration and may vary by Bot.\nWebhooks do not delete polling events. Deduplicate by Bot and event ID when using both.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Updates"
+                ],
+                "summary": "Poll Bot events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "0",
+                        "description": "Exclusive event ID cursor; omitted means 0",
+                        "name": "start_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Positive event count; omitted means 30, capped at 100",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Nonnegative long-poll seconds; omitted means 10, capped at 30; 0 disables waiting",
+                        "name": "timeout",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_GetUpdatesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/bot.sendEvent": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Sends an ephemeral client event, e.g. an agreed typing indicator. Not stored in the persistent event log or intended for offline replay. Success data is {}.\nRequires nonzero user_id and nonempty event_type. Event types are not restricted to an enum; client behavior is agreed with the caller. Data is an unchanged string, optionally empty. A supplied topic_id must belong to this bot and recipient.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Updates"
+                ],
+                "summary": "Send transient client event",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SendEventRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_SendEventResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/bot.update": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "All fields are optional. Omitted or null fields retain their current values. Empty webhook_url or greeting strings clear them; an empty avatar_url leaves the avatar unchanged.\nfeatures and profile replace the entire object; omitted nested fields reset to zero values. An empty features object disables all switches and clears input rules. group_message_policy is a top-level field.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot"
+                ],
+                "summary": "Update bot profile",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.UpdateBotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_UpdateBotResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/bot.whoami": {
+            "get": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Returns the authenticated bot profile, token, group delivery policy, and features stored in the database.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot"
+                ],
+                "summary": "Get bot profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_WhoAmIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/create": {
+            "post": {
+                "security": [
+                    {
+                        "UserToken": []
+                    }
+                ],
+                "description": "Requires an active user session (`Authorization: Bearer \u003cuser token\u003e`). Use the returned bot token for subsequent Bot API calls. The initial group delivery policy is mention_only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot"
+                ],
+                "summary": "Create bot",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.CreateBotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_CreateBotResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/file.uploadMedia": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Accepts JSON file metadata, not multipart bytes. Returns file_id, upload_url and expired_at; the URL expires after five minutes.\nPUT raw file bytes to upload_url with the matching Content-Type. If supplied, use the same content_md5 as Content-MD5 and match positive content_length to the uploaded byte count and Content-Length. Then sendPhoto with file_id and nonzero width/height.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Files"
+                ],
+                "summary": "Get media upload URL",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.UploadMediaRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_UploadMediaResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.editMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Text messages only. Requires message_id, nonempty replacement text (at most 1 MiB of UTF-8 bytes), and exactly one nonzero target identifying the chat. Returns the message ID and updated text.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "Edit text message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.EditMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_EditMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.emptyStreamMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Requires message_id and exactly one nonzero target. Clears text, buffered reasoning and attachments; retains the ID and leaves the message as a draft. Subsequent chunks reuse this ID. Revoked messages cannot be emptied.\nTo regenerate a private-chat reply: empty the old Bot message, resend chunks from index 0 with the same message_id, user_message_id and topic_id, then call finishStreamMessage. Do not omit message_id when regenerating.\nEmptying does not reset the user's stop marker. Requests for the same user_message_id may still be rejected during its five-minute lifetime.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Streaming"
+                ],
+                "summary": "Empty stream message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.EmptyStreamMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_EmptyStreamMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.finishStreamMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "After the last chunk, pass the returned message_id and user_message_id from the user event. Only P2P via to_user_id is supported; to_group_id is ignored.\nOmitted or null text/reasoning assembles stored chunks in index order. Empty text overrides to empty; [] clears reasoning. Final text is limited to 1 MiB of UTF-8 bytes. Finished messages reject further chunks.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Streaming"
+                ],
+                "summary": "Finish stream message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.FinishStreamMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_FinishStreamMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.listMessages": {
+            "get": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Returns readable P2P messages between this Bot and user_id from the last 30 days, newest first. Obtain user_id from an event or the recent-users list.\nFor the next page, pass the previous page's last message_id as before_message_id. The cursor must belong to this chat; an expired cursor returns an empty page. Encrypted messages are excluded.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "List private chat messages",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "P2P peer user ID, required and nonzero",
+                        "name": "user_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exclusive cursor from this chat; reads older messages",
+                        "name": "before_message_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size; omitted, invalid or nonpositive means 50, capped at 100",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_ListMessagesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.listRecentUsers": {
+            "get": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Returns P2P peers with activity in the last 30 days, ordered by latest message ID, newest first. Peers whose latest message is encrypted are excluded.\nFor the next page, pass the last latest_message.message_id as before_message_id. An expired cursor returns an empty page. Use user_id with message.listMessages.\nThe window uses inbox activity time; imported messages may differ from the history endpoint's message-time window.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "List recent private chat users",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Exclusive cursor: previous page's last latest_message.message_id",
+                        "name": "before_message_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size; omitted, invalid or nonpositive means 50, capped at 100",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_ListRecentUsersResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.revokeMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Requires message_id and exactly one nonzero target identifying the chat. Supports text, voice and media-stack messages, subject to message permissions. Success data is {}.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "Revoke message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.RevokeMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_RevokeMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.searchChats": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Restricted to privileged Bots. Searches chat history visible to user_id, including P2P chats and joined groups.\nQuery is trimmed and must remain nonempty. Optional bot_id filters by conversation participant, independently of the calling Bot.\nReturns data.results using protobuf JSON; individual result fields are not expanded in this reference.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Search"
+                ],
+                "summary": "Search user chats",
+                "parameters": [
+                    {
+                        "description": "User, query and optional participant filter",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SearchChatsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/bot.APIResponse-any"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "results": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.sendMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Supply a nonzero user or group target; user target wins if both are set. Text must be nonempty and at most 1 MiB of UTF-8 bytes. Returns message_id.\nFor ordinary replies, omit topic_id. To associate a topic, use the user event data.message.topic_id. Streaming uses sendStreamMessage and requires topic_id on every chunk.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "Send text message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SendMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_SendMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.sendPhoto": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Supply a nonzero target and file_id or image_url. User target wins over group target; file_id wins over image_url.\nFile mode: obtain a URL from uploadMedia, PUT the bytes, then supply file_id and nonzero width/height. Files must belong to this bot. Currently thumbnail_file_id still resolves to the main file.\nURL mode: used only when file_id is empty. thumbnail_url defaults to image_url; thumbnail_file_id is ignored and dimensions need not be nonzero. Text is an optional caption. Returns message_id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "Send photo message",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SendPhotoRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_SendPhotoResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/message.sendStreamMessage": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "First chunk: omit message_id and start at index 0. Reuse the returned ID for later chunks and finishStreamMessage.\nEvery chunk requires user_message_id from the user event data.message.message_id and the same topic_id from data.message.topic_id. Do not substitute a message or session ID for topic_id. Without a topic, use sendMessage without topic_id.\nCurrently only P2P via to_user_id is supported; group streaming via to_group_id is not supported. User target wins if both are nonzero. Combined UTF-8 bytes of text and reasoning strings must not exceed 32 KiB per chunk; final text is limited to 1 MiB at finish.\nReasoning entries should be single-line JSON objects, e.g. {\"type\":\"title\",\"id\":\"1\",\"payload\":\"Thinking\"} and {\"type\":\"text\",\"id\":\"2\",\"payload\":\"Searching\"}. Client convention: matching id appends unless replace=true; parent_id identifies a parent row. The server validates only nonempty, valid JSON entries.\n\nFirst-chunk example (replace the IDs with those from the user event):\n```json\n{\"to_user_id\":123,\"topic_id\":\"696f5600fd5c13c38d851301\",\"user_message_id\":\"696f5342fd5c13c38d85103e\",\"index\":0,\"text\":\"Hello\",\"rich_reasoning\":[\"{\\\"type\\\":\\\"title\\\",\\\"id\\\":\\\"1\\\",\\\"payload\\\":\\\"Thinking\\\"}\"]}\n```",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Streaming"
+                ],
+                "summary": "Send stream message chunk",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SendStreamMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_SendStreamMessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/user.queryUser": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Restricted to privileged Bots. Supply user_id or username; nonzero user_id takes precedence. An empty lookup is rejected.\nReturns ID, username, nickname and avatar URL. A missing user returns an error.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Query user profile",
+                "parameters": [
+                    {
+                        "description": "Lookup by user_id or username",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.QueryUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-bot_QueryUserResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        },
+        "/user.searchContacts": {
+            "post": {
+                "security": [
+                    {
+                        "BotToken": []
+                    }
+                ],
+                "description": "Restricted to privileged Bots. Searches contacts belonging to user_id, not the calling Bot.\nQuery is trimmed and must remain nonempty. Fuzzy matching applies to 2 to 255 Unicode characters; other nonempty lengths still allow exact matching.\nReturns data.results using protobuf JSON; individual result fields are not expanded in this reference.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Search"
+                ],
+                "summary": "Search user contacts",
+                "parameters": [
+                    {
+                        "description": "Contact owner, query and result count",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/bot.SearchContactsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/bot.APIResponse-any"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "results": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid Bot token",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Seconds until retry"
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API error; inspect code and message",
+                        "schema": {
+                            "$ref": "#/definitions/bot.APIResponse-any"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "bot.APIResponse-any": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {},
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_CreateBotResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.CreateBotResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_EditMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.EditMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_EmptyStreamMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.EmptyStreamMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_FinishStreamMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.FinishStreamMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_GetUpdatesResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.GetUpdatesResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_ListMessagesResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.ListMessagesResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_ListRecentUsersResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.ListRecentUsersResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_QueryUserResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.QueryUserResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_RevokeMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.RevokeMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_SendEventResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.SendEventResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_SendMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.SendMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_SendPhotoResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.SendPhotoResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_SendStreamMessageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.SendStreamMessageResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_UpdateBotResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.UpdateBotResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_UploadMediaResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.UploadMediaResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.APIResponse-bot_WhoAmIResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "$ref": "#/definitions/bot.WhoAmIResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.CreateBotRequest": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "greeting_text": {
+                    "description": "Greeting text.",
+                    "type": "string",
+                    "example": "How can I help you?"
+                },
+                "greeting_title": {
+                    "description": "Greeting title.",
+                    "type": "string",
+                    "example": "Hello"
+                },
+                "nickname": {
+                    "description": "Optional bot nickname; at most 20 display characters.",
+                    "type": "string",
+                    "example": "Example Bot"
+                },
+                "username": {
+                    "description": "Required, nonempty bot username.",
+                    "type": "string",
+                    "example": "example_bot"
+                },
+                "webhook_url": {
+                    "description": "Bot event webhook URL; editable later through bot.update.",
+                    "type": "string",
+                    "example": "https://example.com/bot/webhook"
+                }
+            }
+        },
+        "bot.CreateBotResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "description": "Created bot ID.",
+                    "type": "integer"
+                },
+                "token": {
+                    "description": "Bot API access token. Keep it private.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.EditMessageRequest": {
+            "type": "object",
+            "required": [
+                "message_id",
+                "text"
+            ],
+            "properties": {
+                "message_id": {
+                    "description": "Message ID in the specified chat.",
+                    "type": "string"
+                },
+                "text": {
+                    "description": "Nonempty replacement text, at most 1 MiB of UTF-8 bytes.",
+                    "type": "string",
+                    "example": "Hello"
+                },
+                "to_group_id": {
+                    "description": "Group target; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P peer; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                }
+            }
+        },
+        "bot.EditMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.EmptyStreamMessageRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "description": "Stream message ID to empty.",
+                    "type": "string"
+                },
+                "to_group_id": {
+                    "description": "Group target; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P peer; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                }
+            }
+        },
+        "bot.EmptyStreamMessageResponse": {
+            "type": "object"
+        },
+        "bot.Features": {
+            "type": "object",
+            "properties": {
+                "fork_enabled": {
+                    "description": "Whether topic forking is supported.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "skip_enabled": {
+                    "description": "Whether skipping reasoning is supported.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "stop_enabled": {
+                    "description": "Whether stopping a response is supported.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "user_input_policy": {
+                    "description": "Allowed input types and their count, size, and extension limits.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/bot.UserInputPolicy"
+                        }
+                    ]
+                }
+            }
+        },
+        "bot.FinishStreamMessageRequest": {
+            "type": "object",
+            "required": [
+                "message_id",
+                "user_message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "description": "Required stream message ID returned by the first chunk.",
+                    "type": "string"
+                },
+                "rich_reasoning": {
+                    "description": "Omitted/null assembles stored reasoning; [] clears it. Each entry must be nonempty valid JSON.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "text": {
+                    "description": "Final text override, at most 1 MiB of UTF-8 bytes. Omitted/null assembles stored text; empty string clears it.",
+                    "type": "string"
+                },
+                "to_group_id": {
+                    "description": "Ignored; only P2P finalization is supported.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P recipient, matching the chunks.",
+                    "type": "integer"
+                },
+                "user_message_id": {
+                    "description": "Required user event data.message.message_id.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.FinishStreamMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.GetUpdatesResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.Event"
+                    }
+                }
+            }
+        },
+        "bot.ListMessagesResponse": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "description": "Whether older candidates remain; encrypted-message filtering may shorten the page.",
+                    "type": "boolean"
+                },
+                "messages": {
+                    "description": "Readable messages, newest first.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/bot.Message"
+                    }
+                }
+            }
+        },
+        "bot.ListRecentUsersResponse": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "description": "Whether older candidates remain; encrypted-message filtering may shorten the page.",
+                    "type": "boolean"
+                },
+                "users": {
+                    "description": "Peers and their latest messages.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/bot.RecentUser"
+                    }
+                }
+            }
+        },
+        "bot.Message": {
+            "type": "object",
+            "properties": {
+                "attachment": {
+                    "$ref": "#/definitions/event.MessageAttachment"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "from_user_id": {
+                    "type": "integer"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "message_type": {
+                    "type": "string"
+                },
+                "payload": {
+                    "$ref": "#/definitions/event.MessagePayload"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "to_user_id": {
+                    "type": "integer"
+                },
+                "topic_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.Profile": {
+            "type": "object",
+            "properties": {
+                "dark_icon_url": {
+                    "description": "Dark-mode icon URL.",
+                    "type": "string"
+                },
+                "introduction": {
+                    "description": "Bot introduction page URL.",
+                    "type": "string"
+                },
+                "light_icon_url": {
+                    "description": "Light-mode icon URL.",
+                    "type": "string"
+                },
+                "subtitle": {
+                    "description": "Bot display subtitle.",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Bot display title.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.QueryUserRequest": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "description": "User ID; nonzero takes precedence over username.",
+                    "type": "integer",
+                    "example": 10001
+                },
+                "username": {
+                    "description": "Username, used only when user_id is zero.",
+                    "type": "string",
+                    "example": "alice"
+                }
+            }
+        },
+        "bot.QueryUserResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "description": "Avatar URL.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "User ID.",
+                    "type": "integer"
+                },
+                "nickname": {
+                    "description": "Display nickname.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.RecentUser": {
+            "type": "object",
+            "properties": {
+                "latest_message": {
+                    "description": "Latest message between this user and the Bot.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/bot.Message"
+                        }
+                    ]
+                },
+                "user_id": {
+                    "description": "P2P peer user ID, usable for history queries and replies.",
+                    "type": "integer"
+                }
+            }
+        },
+        "bot.RevokeMessageRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "description": "Message ID in the specified chat.",
+                    "type": "string"
+                },
+                "to_group_id": {
+                    "description": "Group target; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P peer; supply exactly one nonzero user or group target.",
+                    "type": "integer"
+                }
+            }
+        },
+        "bot.RevokeMessageResponse": {
+            "type": "object"
+        },
+        "bot.SearchChatsRequest": {
+            "type": "object",
+            "required": [
+                "query",
+                "user_id"
+            ],
+            "properties": {
+                "bot_id": {
+                    "description": "Optional participant Bot ID filter, independent of the caller.",
+                    "type": "integer"
+                },
+                "limit": {
+                    "description": "Result count; zero or values above 50 use 20.",
+                    "type": "integer",
+                    "default": 20
+                },
+                "query": {
+                    "description": "Search query, nonempty after trimming whitespace.",
+                    "type": "string",
+                    "example": "project status"
+                },
+                "user_id": {
+                    "description": "User whose visible history is searched; required and nonzero.",
+                    "type": "integer",
+                    "example": 10001
+                }
+            }
+        },
+        "bot.SearchContactsRequest": {
+            "type": "object",
+            "required": [
+                "query",
+                "user_id"
+            ],
+            "properties": {
+                "limit": {
+                    "description": "Result count; zero uses 20, capped at 100.",
+                    "type": "integer",
+                    "default": 20
+                },
+                "query": {
+                    "description": "Nonempty trimmed query; 2 to 255 Unicode characters enable fuzzy matching.",
+                    "type": "string",
+                    "example": "Alice"
+                },
+                "user_id": {
+                    "description": "Contact owner user ID; required and nonzero.",
+                    "type": "integer",
+                    "example": 10001
+                }
+            }
+        },
+        "bot.SendEventRequest": {
+            "type": "object",
+            "required": [
+                "event_type",
+                "user_id"
+            ],
+            "properties": {
+                "data": {
+                    "description": "Unchanged application-defined string; may be empty.",
+                    "type": "string"
+                },
+                "event_type": {
+                    "description": "Nonempty event name; server imposes no enum.",
+                    "type": "string"
+                },
+                "topic_id": {
+                    "description": "Optional topic owned by both this bot and recipient.",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "Nonzero recipient user ID.",
+                    "type": "integer"
+                }
+            }
+        },
+        "bot.SendEventResponse": {
+            "type": "object"
+        },
+        "bot.SendMessageRequest": {
+            "type": "object",
+            "required": [
+                "text"
+            ],
+            "properties": {
+                "text": {
+                    "description": "Nonempty complete text, at most 1 MiB of UTF-8 bytes.",
+                    "type": "string",
+                    "example": "Hello"
+                },
+                "to_group_id": {
+                    "description": "Group recipient, used when to_user_id is zero.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P recipient; takes precedence over a nonzero group target.",
+                    "type": "integer"
+                },
+                "topic_id": {
+                    "description": "Optional user event data.message.topic_id; omit for ordinary replies.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.SendMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.SendPhotoRequest": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "description": "Uploaded file ID owned by this bot; takes precedence over image_url.",
+                    "type": "string"
+                },
+                "height": {
+                    "description": "Image height; nonzero in file mode.",
+                    "type": "integer",
+                    "example": 600
+                },
+                "image_url": {
+                    "description": "External image URL, used only when file_id is empty.",
+                    "type": "string"
+                },
+                "preview_argb": {
+                    "description": "Optional eight-digit ARGB hex color, accepting # or 0x prefixes.",
+                    "type": "string",
+                    "example": "#FFFFFFFF"
+                },
+                "text": {
+                    "description": "Optional photo caption.",
+                    "type": "string"
+                },
+                "thumbnail_file_id": {
+                    "description": "File-mode thumbnail parameter; currently still resolves to file_id, not an independent thumbnail.",
+                    "type": "string"
+                },
+                "thumbnail_url": {
+                    "description": "URL-mode thumbnail; defaults to image_url and is ignored in file mode.",
+                    "type": "string"
+                },
+                "to_group_id": {
+                    "description": "Group recipient, used when to_user_id is zero.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P recipient; takes precedence over a nonzero group target.",
+                    "type": "integer"
+                },
+                "topic_id": {
+                    "description": "Optional user event data.message.topic_id.",
+                    "type": "string"
+                },
+                "width": {
+                    "description": "Image width; nonzero in file mode.",
+                    "type": "integer",
+                    "example": 800
+                }
+            }
+        },
+        "bot.SendPhotoResponse": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.SendStreamMessageRequest": {
+            "type": "object",
+            "required": [
+                "topic_id",
+                "user_message_id"
+            ],
+            "properties": {
+                "clear_text": {
+                    "description": "Defaults to false. Removes stored text at this index and above, retaining earlier text. Reasoning is not bulk-cleared, but this chunk replaces reasoning at the same index.",
+                    "type": "boolean",
+                    "default": false,
+                    "example": false
+                },
+                "index": {
+                    "description": "Zero-based chunk index. Increase for later chunks; repeated indices overwrite stored content.",
+                    "type": "integer",
+                    "example": 0
+                },
+                "message_id": {
+                    "description": "Omit for the first chunk; reuse its returned ID for later chunks and finish.",
+                    "type": "string"
+                },
+                "rich_reasoning": {
+                    "description": "Nonempty valid JSON strings; client display conventions are described above.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "text": {
+                    "description": "Chunk text; text plus reasoning strings must fit within 32 KiB of UTF-8 bytes.",
+                    "type": "string",
+                    "example": "Hello"
+                },
+                "to_group_id": {
+                    "description": "Unsupported for streaming; currently only P2P via to_user_id is supported.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "P2P recipient; takes precedence over a nonzero to_group_id.",
+                    "type": "integer"
+                },
+                "topic_id": {
+                    "description": "Required on every chunk: user event data.message.topic_id; keep unchanged.",
+                    "type": "string"
+                },
+                "user_message_id": {
+                    "description": "Required on every chunk: user event data.message.message_id.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.SendStreamMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.UpdateBotRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "description": "Avatar URL; only http:// or https:// values update it. Other values leave it unchanged.",
+                    "type": "string"
+                },
+                "features": {
+                    "description": "Replaces all features; {} resets them to zero values.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/bot.Features"
+                        }
+                    ]
+                },
+                "greeting_text": {
+                    "description": "Greeting text; an empty string clears it.",
+                    "type": "string"
+                },
+                "greeting_title": {
+                    "description": "Greeting title; an empty string clears it.",
+                    "type": "string"
+                },
+                "group_message_policy": {
+                    "description": "Group delivery: mention_only receives direct mentions or @all; all receives all regular-user messages. Bot messages are not delivered to other bots.",
+                    "enum": [
+                        "mention_only",
+                        "all"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/immain.BotGroupMessagePolicy"
+                        }
+                    ],
+                    "example": "mention_only"
+                },
+                "nickname": {
+                    "description": "Nickname, at most 20 display characters; trimmed when saved. Empty is allowed.",
+                    "type": "string",
+                    "example": "Example Bot"
+                },
+                "profile": {
+                    "description": "Replaces the entire profile; {} clears all its fields.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/bot.Profile"
+                        }
+                    ]
+                },
+                "webhook_url": {
+                    "description": "Webhook URL; an empty string clears it.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.UpdateBotResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "description": "Bot avatar URL.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time in RFC 3339 format.",
+                    "type": "string"
+                },
+                "group_message_policy": {
+                    "description": "Updated group delivery policy.",
+                    "type": "string",
+                    "enum": [
+                        "mention_only",
+                        "all"
+                    ]
+                },
+                "id": {
+                    "description": "Bot ID.",
+                    "type": "integer"
+                },
+                "nickname": {
+                    "description": "Bot nickname.",
+                    "type": "string"
+                },
+                "token": {
+                    "description": "Bot API access token. Keep it private.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "Update time in RFC 3339 format.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Bot username.",
+                    "type": "string"
+                }
+            }
+        },
+        "bot.UploadMediaRequest": {
+            "type": "object",
+            "properties": {
+                "content_length": {
+                    "description": "Byte count; positive values are passed to upload signing and must match the PUT body.",
+                    "type": "integer",
+                    "example": 1024
+                },
+                "content_md5": {
+                    "description": "Optional MD5, passed unchanged to signing. PUT with the same Content-MD5; not used for deduplication.",
+                    "type": "string"
+                },
+                "content_type": {
+                    "description": "MIME type; nonempty values are passed to upload signing. PUT with the same Content-Type.",
+                    "type": "string",
+                    "example": "image/jpeg"
+                }
+            }
+        },
+        "bot.UploadMediaResponse": {
+            "type": "object",
+            "properties": {
+                "expired_at": {
+                    "type": "string"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "upload_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "bot.UserInputPolicy": {
+            "type": "object",
+            "properties": {
+                "rules": {
+                    "description": "Input rules; unlisted types are allowed.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/bot.UserInputRule"
+                    }
+                }
+            }
+        },
+        "bot.UserInputRule": {
+            "type": "object",
+            "properties": {
+                "allowed_extensions": {
+                    "description": "Allowed lowercase file extensions without dots; empty means unrestricted.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "pdf",
+                        "txt"
+                    ]
+                },
+                "disallowed": {
+                    "description": "Disables this input type. False or a missing rule allows it.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "max_bytes_per_item": {
+                    "description": "Maximum bytes per item; 0 means unlimited.",
+                    "type": "integer",
+                    "default": 0
+                },
+                "max_count_per_message": {
+                    "description": "Maximum items per message; 0 means unlimited.",
+                    "type": "integer",
+                    "default": 0
+                },
+                "type": {
+                    "description": "Input type: text, image, audio, video, or file.",
+                    "type": "string",
+                    "enum": [
+                        "text",
+                        "image",
+                        "audio",
+                        "video",
+                        "file"
+                    ]
+                }
+            }
+        },
+        "bot.WhoAmIResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "description": "Bot avatar URL.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time in RFC 3339 format.",
+                    "type": "string"
+                },
+                "features": {
+                    "description": "Current bot features and input rules.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/bot.Features"
+                        }
+                    ]
+                },
+                "group_message_policy": {
+                    "description": "Group delivery policy: mention_only or all.",
+                    "type": "string",
+                    "enum": [
+                        "mention_only",
+                        "all"
+                    ]
+                },
+                "id": {
+                    "description": "Bot ID.",
+                    "type": "integer"
+                },
+                "nickname": {
+                    "description": "Bot nickname.",
+                    "type": "string"
+                },
+                "token": {
+                    "description": "Bot API access token. Keep it private.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "Update time in RFC 3339 format.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Bot username.",
+                    "type": "string"
+                }
+            }
+        },
+        "event.Data": {
+            "type": "object",
+            "properties": {
+                "extra": {
+                    "description": "Optional event-specific data, encoded as a string.",
+                    "type": "string"
+                },
+                "group": {
+                    "description": "Related group, when provided by the event.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/event.Group"
+                        }
+                    ]
+                },
+                "message": {
+                    "description": "Message or control-event target. Fields vary by event_type.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/event.Message"
+                        }
+                    ]
+                },
+                "messages": {
+                    "description": "Conversation history included in a bot:fork_topic event.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.Message"
+                    }
+                },
+                "topic": {
+                    "description": "Topic referenced by a fork or deletion event.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/event.Topic"
+                        }
+                    ]
+                },
+                "user": {
+                    "description": "Related user, when provided by the event.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/event.User"
+                        }
+                    ]
+                }
+            }
+        },
+        "event.Event": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "description": "Receiving Bot ID, included when available.",
+                    "type": "integer"
+                },
+                "data": {
+                    "$ref": "#/definitions/event.Data"
+                },
+                "event_type": {
+                    "description": "Selects the payload shape; see the event guide in the API introduction.",
+                    "type": "string",
+                    "example": "user_message"
+                },
+                "id": {
+                    "description": "Event cursor; distinct from data.message.message_id. Deduplicate per Bot.",
+                    "type": "string"
+                },
+                "timestamp": {
+                    "description": "Event creation time in Unix milliseconds.",
+                    "type": "integer"
+                },
+                "version": {
+                    "description": "Event format version.",
+                    "type": "string",
+                    "example": "v1"
+                }
+            }
+        },
+        "event.Group": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.Message": {
+            "type": "object",
+            "properties": {
+                "attachment": {
+                    "$ref": "#/definitions/event.MessageAttachment"
+                },
+                "message_id": {
+                    "description": "Message ID; pass the triggering user's message ID as user_message_id when replying in a stream.",
+                    "type": "string"
+                },
+                "message_type": {
+                    "description": "Message kind. Attachment fields depend on this value.",
+                    "type": "string"
+                },
+                "payload": {
+                    "$ref": "#/definitions/event.MessagePayload"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "to_group_id": {
+                    "description": "Recipient group; absent for private messages.",
+                    "type": "integer"
+                },
+                "to_user_id": {
+                    "description": "Recipient in a private chat; absent for group messages.",
+                    "type": "integer"
+                },
+                "topic_id": {
+                    "description": "Existing topic to use for stream replies. Never substitute a message or session ID.",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "Sender's user ID.",
+                    "type": "integer"
+                }
+            }
+        },
+        "event.MessageAttachment": {
+            "type": "object",
+            "properties": {
+                "custom": {
+                    "$ref": "#/definitions/event.MessageAttachmentCustom"
+                },
+                "file": {
+                    "$ref": "#/definitions/event.MessageAttachmentFile"
+                },
+                "file_stack": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MessageAttachmentFile"
+                    }
+                },
+                "images": {
+                    "description": "Photo",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MessageAttachmentImage"
+                    }
+                },
+                "media_stack": {
+                    "description": "Ordered image/video items; each item's type selects image or video.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MessageAttachmentMediaStack"
+                    }
+                },
+                "videos": {
+                    "description": "Video",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MessageAttachmentVideo"
+                    }
+                },
+                "voice": {
+                    "description": "Voice attachment, including an optional transcript.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/event.MessageAttachmentVoice"
+                        }
+                    ]
+                }
+            }
+        },
+        "event.MessageAttachmentCustom": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.MessageAttachmentFile": {
+            "type": "object",
+            "properties": {
+                "content_md5": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "thumbnail_file": {
+                    "$ref": "#/definitions/event.MessageAttachmentFile"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.MessageAttachmentImage": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "event.MessageAttachmentMediaStack": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "$ref": "#/definitions/event.MessageAttachmentImage"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "video": {
+                    "$ref": "#/definitions/event.MessageAttachmentVideo"
+                }
+            }
+        },
+        "event.MessageAttachmentVideo": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "type": "string"
+                },
+                "duration": {
+                    "type": "integer"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "event.MessageAttachmentVoice": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "type": "string"
+                },
+                "duration": {
+                    "type": "integer"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.MessagePayload": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "description": "Application-defined message metadata, preserved as a string.",
+                    "type": "string"
+                }
+            }
+        },
+        "event.Topic": {
+            "type": "object",
+            "properties": {
+                "topic_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.User": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string"
+                }
+            }
+        },
+        "immain.BotGroupMessagePolicy": {
+            "type": "string",
+            "enum": [
+                "mention_only",
+                "all"
+            ],
+            "x-enum-varnames": [
+                "BotGroupMessagePolicyMentionOnly",
+                "BotGroupMessagePolicyAll"
+            ]
+        }
+    },
+    "securityDefinitions": {
+        "BotToken": {
+            "description": "Bot token, required for all methods except create.",
+            "type": "apiKey",
+            "name": "X-Api-Key",
+            "in": "header"
+        },
+        "UserToken": {
+            "description": "Signed-in user session token, including the prefix: Bearer \u003ctoken\u003e.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

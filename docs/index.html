@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIU Bot API · Swagger UI</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>body{margin:0}nav{padding:12px 24px;font:14px system-ui;background:#f5f7fa}input{width:300px;padding:6px}button{padding:6px}nav a{margin-right:20px}</style>
+</head>
+<body>
+  <nav><a href="swagger.json">Download specification</a><label>API origin <input id="origin" type="url" value="http://localhost:8080"></label> <button id="load">Apply</button><span id="error" role="alert"></span></nav>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script>
+    async function load() {
+      const error = document.getElementById('error');
+      error.textContent = '';
+      try {
+        const origin = new URL(document.getElementById('origin').value);
+        if (!['http:', 'https:'].includes(origin.protocol) || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
+          throw new Error('Enter an HTTP(S) origin without a path, query or credentials.');
+        }
+        const response = await fetch('swagger.json');
+        if (!response.ok) throw new Error(`Cannot load specification: HTTP ${response.status}`);
+        const spec = await response.json();
+        spec.host = origin.host;
+        spec.schemes = [origin.protocol.slice(0, -1)];
+        SwaggerUIBundle({spec, dom_id: '#swagger-ui', deepLinking: true, validatorUrl: null, persistAuthorization: false});
+      } catch (cause) {
+        error.textContent = cause.message;
+      }
+    }
+    document.getElementById('load').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>
